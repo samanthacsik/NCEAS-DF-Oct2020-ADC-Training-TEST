@@ -1,0 +1,167 @@
+---
+title: "test 9.2"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load packages
+```{r}
+library(leaflet)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(DT)
+library(scales)
+```
+
+### Import data from KNB
+```{r}
+data_url <- "https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3Af119a05b-bbe7-4aea-93c6-85434dcb1c5e"
+
+esc <- tryCatch(
+  read.csv("data/escapement.csv", stringsAsFactors = FALSE),
+  error = function(cond) {
+    message(paste("Escapement file does not seem to exist, so get it from the KNB."))
+    esc <-
+      read.csv(url(data_url, method = "libcurl"), stringsAsFactors = FALSE)
+    return(esc)
+  }
+)
+
+head(esc)
+```
+
+### Data wrangling: calculate annual escapement by species and region
+```{r}
+annual_esc <- esc %>% 
+  separate(sampleDate, c("Year", "Month", "Day"), sep = "-") %>% 
+  mutate(Year = as.numeric(Year)) %>% 
+  group_by(Species, SASAP.Region, Year) %>% 
+  summarize(escapement = sum(DailyCount)) %>% 
+  filter(Species %in% c("Chinook", "Sockeye", "Chum", "Coho", "Pink"))
+
+head(annual_esc)
+```
+
+### Create a static figure using `ggplot2`
+```{r}
+ggplot(annual_esc, aes(x = Species, y = escapement, fill = SASAP.Region)) +
+  geom_col()
+```
+
+### An aside: piping data into ggplot
+```{r}
+annual_esc %>%
+  filter(SASAP.Region == "Kodiak") %>%
+  ggplot(aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point()
+```
+
+### Back to creating static figures -- separate data wrangling & plotting sections of the above code and play with adjusting the theme
+```{r}
+kodiak_esc <- annual_esc %>%
+  filter(SASAP.Region == "Kodiak") 
+```
+
+```{r}
+ggplot(kodiak_esc, aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point() +
+  ylab("Escapement") +
+  ggtitle("Kodiak Salmon Escapement") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+```
+
+### You can save your theme and add it to any future plots too
+```{r}
+my_theme <- theme_bw() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+ggplot(kodiak_esc, aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point() +
+  ylab("Escapement") +
+  ggtitle("Kodiak Salmon Escapement") +
+  my_theme
+```
+
+### Rotate x-axis tick marks to a 45 degree angle
+```{r}
+ggplot(kodiak_esc, aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point() +
+  ylab("Escapement") +
+  ggtitle("Kodiak Salmon Escapement") +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45)
+  )
+```
+
+### Smarter tick labels using `scales`
+```{r}
+ggplot(kodiak_esc, aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = comma) + # scientific to normal comma notation, yay!
+  ylab("Escapement") +
+  ggtitle("Kodiak Salmon Escapement") +
+  my_theme
+```
+
+### Creating multiple plots
+```{r}
+ggplot(annual_esc, aes(x = Year, y = escapement, color = Species)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = comma) + # scientific to normal comma notation, yay!
+  facet_wrap(~SASAP.Region, scales = "free_y", ncol = 2) +
+  ylab("Escapement") +
+  ggtitle("Kodiak Salmon Escapement") +
+  my_theme
+```
+
+### Create an interactive table of unique sampling locations using `DT`
+```{r}
+locations <- esc %>% 
+  distinct(Location, Latitude, Longitude) %>% 
+  drop_na()
+
+datatable(locations)
+```
+
+### Create an interactive map using `leaflet`
+```{r}
+leaflet(locations) %>% 
+  addTiles() %>% 
+  addMarkers(lng = ~Longitude, lat = ~Latitude, popup = ~Location)
+```
+
+### Use `leaflet` to import Web Map Service tiles (this is an example using GEBCO WMS tiles)
+```{r}
+leaflet(locations) %>% 
+  addWMSTiles("https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv?",
+              layers = "GEBCO_LATEST",
+              attribution = "Imager reproduced from the GEBCO_2014 Grid, version 20150318, www.gebco.net") %>% 
+  addCircleMarkers(lng = ~Longitude,
+                  lat = ~Latitude,
+                  popup = ~Location,
+                  radius = 5,
+                  # set fill properties
+                  fillColor = "salmon",
+                  fillOpacity = 1,
+                  # set stroke properties
+                  stroke = T,
+                  weight = 0.5, color = "white", 
+                  opacity = 1)
+```
+
